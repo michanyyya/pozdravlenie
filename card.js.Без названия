@@ -1,0 +1,330 @@
+const data = window.__CARD__ || { photoPath:"", compliments:[], allCompliments:{} };
+
+/* helpers */
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+/* ===== Steps (только если они реально есть в HTML) ===== */
+const steps = $$(".step");
+const progressBar = $("#progressBar");
+
+if (steps.length) {
+  let step = 1;
+  const stepsTotal = steps.length;
+
+  function setStep(n){
+    step = Math.max(1, Math.min(stepsTotal, n));
+    steps.forEach(el => el.classList.toggle("active", +el.dataset.step === step));
+
+    if (progressBar) {
+      const pct = stepsTotal > 1 ? Math.round(((step-1)/(stepsTotal-1))*100) : 0;
+      progressBar.style.width = `${pct}%`;
+    }
+  }
+
+  window.__setStep = setStep;
+
+  $$("[data-next]").forEach(btn => btn.addEventListener("click", () => setStep(step+1)));
+  $$("[data-prev]").forEach(btn => btn.addEventListener("click", () => setStep(step-1)));
+  setStep(1);
+}
+
+const playBtn = document.getElementById("playBtn");
+if (playBtn) {
+  playBtn.addEventListener("click", () => {
+    if (window.__setStep) window.__setStep(2); // шаг 2 = пазл
+  });
+}
+
+function pluralDays(n){
+  n = Math.abs(Number(n) || 0);
+  const n10 = n % 10, n100 = n % 100;
+  if (n100 >= 11 && n100 <= 19) return "дней";
+  if (n10 === 1) return "день";
+  if (n10 >= 2 && n10 <= 4) return "дня";
+  return "дней";
+}
+
+/* ===== Envelope (клик по конверту или подписи) ===== */
+const overlay = $("#envelopeOverlay");
+const env = overlay ? overlay.querySelector(".env") : null;
+const hint = $("#openHint");
+const nextBtn = $("#overlayNext");
+
+if (overlay && env) {
+  const open = () => {
+    // 1) открываем клапан
+    env.classList.add("open");
+
+    // 2) чуть позже показываем лист
+    setTimeout(() => {
+      env.classList.add("show-paper");
+    }, 220);
+
+    // 3) вместо подсказки показываем кнопку "Далее"
+    if (hint) hint.style.display = "none";
+    if (nextBtn) nextBtn.style.display = "inline-flex";
+
+    // важно: ОВЕРЛЕЙ ТУТ НЕ УДАЛЯЕМ
+  };
+
+  const closeOverlay = () => {
+    overlay.classList.add("hide");
+    setTimeout(() => overlay.remove(), 460);
+  };
+
+  env.addEventListener("click", open);
+  hint?.addEventListener("click", open);
+  nextBtn?.addEventListener("click", closeOverlay);
+}
+
+/* ===== Warm words swipe ===== */
+const msgCard = document.getElementById("msgCard");
+
+if (msgCard) {
+  const messages = (data.memoryMessages || []).length
+    ? data.memoryMessages
+    : ["С праздником! ❤️"];
+
+  let index = 0;
+  msgCard.textContent = messages[index];
+
+  let startX = 0;
+
+  msgCard.addEventListener("touchstart", e=>{
+    startX = e.touches[0].clientX;
+  });
+
+  msgCard.addEventListener("touchend", e=>{
+    const diff = e.changedTouches[0].clientX - startX;
+
+    if (Math.abs(diff) > 40){
+      if (diff < 0){
+        index = (index + 1) % messages.length;
+      } else {
+        index = (index - 1 + messages.length) % messages.length;
+      }
+
+      msgCard.style.opacity = 0;
+      setTimeout(()=>{
+        msgCard.textContent = messages[index];
+        msgCard.style.opacity = 1;
+      },150);
+    }
+  });
+}
+
+/* ===== Puzzle (только если есть контейнер пазла) ===== */
+const puzzleEl = $("#puzzle");
+const puzzleStatus = $("#puzzleStatus");
+const puzzleNext = $("#puzzleNext");
+const shuffleBtn = $("#puzzleShuffle");
+
+if (puzzleEl) {
+  const GRID = 3;
+  let order = [];
+  let selectedIdx = null;
+
+  function makeSolved(){
+    order = Array.from({length: GRID*GRID}, (_, i) => i);
+  }
+  function shuffle(){
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+  }
+  function isSolved(){
+    return order.every((v, i) => v === i);
+  }
+
+  function updatePuzzleState(){
+    if (!puzzleStatus || !puzzleNext) return;
+    if (isSolved()){
+      puzzleStatus.textContent = "Готово! Ты умничка :)";
+      puzzleNext.disabled = false;
+    } else {
+      puzzleStatus.textContent = "Собери картинку ✨";
+      puzzleNext.disabled = true;
+    }
+  }
+
+  function renderPuzzle(){
+    puzzleEl.innerHTML = "";
+    puzzleEl.style.gridTemplateColumns = `repeat(${GRID}, 1fr)`;
+
+    const img = data.photoPath || "";
+    for (let cell = 0; cell < order.length; cell++){
+      const pieceIndex = order[cell];
+
+      const div = document.createElement("div");
+      div.className = "piece";
+      div.dataset.cell = String(cell);
+
+      if (img) {
+        div.style.backgroundImage = `url(${img})`;
+        div.style.backgroundSize = `${GRID*100}% ${GRID*100}%`;
+
+        const x = pieceIndex % GRID;
+        const y = Math.floor(pieceIndex / GRID);
+        div.style.backgroundPosition = `${(x/(GRID-1))*100}% ${(y/(GRID-1))*100}%`;
+      } else {
+        div.textContent = "Фото";
+        div.style.display = "flex";
+        div.style.alignItems = "center";
+        div.style.justifyContent = "center";
+      }
+
+      div.addEventListener("click", () => {
+        const pieces = $$(".piece");
+        if (selectedIdx === null){
+          selectedIdx = cell;
+          pieces[cell]?.classList.add("sel");
+          return;
+        }
+        if (selectedIdx === cell){
+          pieces[cell]?.classList.remove("sel");
+          selectedIdx = null;
+          return;
+        }
+        [order[selectedIdx], order[cell]] = [order[cell], order[selectedIdx]];
+        selectedIdx = null;
+        renderPuzzle();
+      });
+
+      puzzleEl.appendChild(div);
+    }
+
+    updatePuzzleState();
+  }
+
+  shuffleBtn?.addEventListener("click", () => {
+    selectedIdx = null;
+    shuffle();
+    renderPuzzle();
+  });
+
+  makeSolved();
+  shuffle();
+  renderPuzzle();
+}
+
+/* ===== Confetti (только если есть кнопка) ===== */
+const confettiBtn = $("#confetti");
+if (confettiBtn) {
+  confettiBtn.addEventListener("click", () => {
+    const n = 120;
+    for (let i=0;i<n;i++){
+      const s = document.createElement("div");
+      s.style.position="fixed";
+      s.style.left = Math.random()*100 + "vw";
+      s.style.top = "-10px";
+      s.style.width = (6+Math.random()*6) + "px";
+      s.style.height = (10+Math.random()*10) + "px";
+      s.style.background = `hsl(${Math.random()*360},90%,60%)`;
+      s.style.borderRadius = "3px";
+      s.style.zIndex = "99999";
+      s.style.transform = `rotate(${Math.random()*180}deg)`;
+      document.body.appendChild(s);
+
+      const dur = 900 + Math.random()*900;
+      const x = (Math.random()*2-1) * 120;
+      s.animate([
+        { transform: s.style.transform, top:"-10px", opacity:1 },
+        { transform: `translateX(${x}px) rotate(${360+Math.random()*360}deg)`, top:"110vh", opacity:0.9 }
+      ], { duration: dur, easing:"cubic-bezier(.2,.8,.2,1)" }).onfinish = () => s.remove();
+    }
+  });
+}
+
+function initMemoryCards(){
+  const grid = document.getElementById("memoryGrid");
+  if (!grid) return;
+
+  // Новый формат: memoryCards = [{path, label}]
+  const cards = (window.__CARD__?.memoryCards || []).slice(0, 6);
+
+  // Старый формат (на всякий): memoryPhotos = ["..."]
+  const legacyPhotos = (window.__CARD__?.memoryPhotos || []).slice(0, 6);
+
+  let normalized = cards;
+  if (!normalized.length && legacyPhotos.length) {
+    normalized = legacyPhotos.map((p, i) => ({ path: p, label: `Фото ${i+1}` }));
+  }
+
+  grid.innerHTML = "";
+
+  // ВАЖНО: рисуем ровно столько карточек, сколько реально есть
+  if (!normalized.length) {
+    grid.innerHTML = `<div class="p muted">Карточек нет 😕</div>`;
+    return;
+  }
+
+  for (const item of normalized) {
+    const card = document.createElement("div");
+    card.className = "memCard";
+
+    const front = document.createElement("div");
+    front.className = "memFront";
+    front.textContent = (item.label || "Открой 💌").slice(0, 16);
+
+    const back = document.createElement("div");
+    back.className = "memBack";
+    back.style.backgroundImage = `url(${item.path})`;
+
+    card.appendChild(front);
+    card.appendChild(back);
+
+    card.addEventListener("click", () => card.classList.toggle("flipped"));
+    grid.appendChild(card);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", initMemoryCards);
+
+/* ===== Floating stars generator ===== */
+(function(){
+  const layer = document.getElementById("starsLayer");
+  if (!layer) return;
+
+  // было условно 60 — делаем ~20% меньше
+  const count = 40;
+
+  for (let i = 0; i < count; i++) {
+    const s = document.createElement("div");
+    s.className = "star";
+
+    const size = 8 + Math.random() * 10;
+    s.style.width = size + "px";
+    s.style.height = size + "px";
+
+    // равномерно по всей странице
+    s.style.left = (Math.random() * 100) + "vw";
+    s.style.top  = (Math.random() * 100) + "vh";
+
+    // индивидуальный “дрейф”
+    const dx = (Math.random() * 120 - 60).toFixed(0) + "px";
+    const dy = (Math.random() * 90 - 45).toFixed(0) + "px";
+    s.style.setProperty("--dx", dx);
+    s.style.setProperty("--dy", dy);
+
+    // разная скорость и фаза
+    const dur = 14 + Math.random() * 16;
+    s.style.setProperty("--dur", dur.toFixed(1) + "s");
+    s.style.animationDelay = (-Math.random() * dur).toFixed(2) + "s";
+
+    // чуть разная прозрачность
+    s.style.opacity = (0.10 + Math.random() * 0.18).toFixed(2);
+
+    layer.appendChild(s);
+  }
+})();
+
+/* ===== Restart to beginning ===== */
+const restartBtn = document.getElementById("restartBtn");
+if (restartBtn){
+  restartBtn.addEventListener("click", ()=>{
+    if (window.__setStep) window.__setStep(1);
+    window.scrollTo({top:0, behavior:"smooth"});
+  });
+}
